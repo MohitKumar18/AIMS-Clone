@@ -21,6 +21,13 @@ CREATE TABLE course_prereq (
     FOREIGN KEY (prereq_id) REFERENCES course_catalog(course_id)
 ); -- course_id is the course that has prereqs, prereq_id is the prereq
 
+CREATE TABLE time_table_slots (
+    id INT UNIQUE PRIMARY KEY,
+    day VARCHAR(10),
+    beginning TIME,
+    ending TIME
+);
+
 CREATE TABLE course_offering (
     offering_id VARCHAR(255) UNIQUE PRIMARY KEY,
     faculty_id INT NOT NULL,
@@ -217,11 +224,16 @@ END
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION faculty_registration (
-    IN faculty_id INT
+    IN faculty_id INT,
+    IN first_name VARCHAR(100),
+    IN last_name VARCHAR(100),
+    IN department VARCHAR(100),
 ) RETURNS VOID AS $$
 BEGIN
     -- make a new user with faculty id
     EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', faculty_id);
+
+    INSERT INTO faculty_database VALUES (faculty_id, first_name, last_name, department);
 
     -- make a table for course offering of this faculty
     EXECUTE format (
