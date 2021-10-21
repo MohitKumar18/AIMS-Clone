@@ -34,26 +34,62 @@ CREATE TABLE student_credit_info (
     entry_number VARCHAR(15) NOT NULL,
     last_semester INT,
     second_last_semester INT,
-    total_credits INT
+    maximum_credits_allowed FLOAT
 );
 
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_catalog TO dean_acads;
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_catalog TO acads_office;
+CREATE TABLE student_database (
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    entry_number VARCHAR(15),
+    course VARCHAR(100),
+    branch VARCHAR(100),
+    year INT,
+    credits_completed FLOAT,
+    cgpa FLOAT
+);
 
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_prereq TO dean_acads;
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_prereq TO acads_office;
+CREATE TABLE faculty_database (
+    faculty_id INT PRIMARY KEY,
+    first_name varchar(100),
+    last_name varchar(100),
+    department varchar(100)
+);
 
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_offering TO dean_acads;
-GRANT SELECT, UPDATE, INSERT, DELETE ON course_offering TO acads_office;
+CREATE TABLE batchwise_FA_list (
+    course VARCHAR(100),
+    branch VARCHAR(100),
+    year INT,
+    faculty_id INT
+);
 
-GRANT SELECT, UPDATE, INSERT, DELETE ON student_past_semester_credits TO dean_acads;
-GRANT SELECT, UPDATE, INSERT, DELETE ON student_past_semester_credits TO acads_office;
+CREATE OR REPLACE FUNCTION student_ticket_generator (
+    IN entry_number VARCHAR(15),
+    IN extra_credits_required INT,
+    IN semester INT,
+    IN year INT
+) RETURNS VOID AS $$
+DECLARE
+    faculty_id INT,
+BEGIN
+    -- add ticket to student ticket table
+    EXECUTE format (
+        'INSERT INTO %I VALUES(%I, %I, %I, %I, Awaiting FA Approval);', 'student_ticket_table_' || entry_number, entry_number || '_' || semester || '_' || year, extra_credits_required, semester, year
+    );
+
+    SELECT l.faculty_id FROM student_database s, batchwise_FA_list l WHERE s.entry_number = entry_number and l.branch = s.branch and l.year = s.year and l.course = s.course INTO faculty_id;
+
+    -- add ticket to FA's table
+    EXECUTE format(
+        'INSERT INTO %I VALUES(%I, %I, %I, Awaiting Approval);', 'FA_ticket_table_' || faculty_id, entry_number || '_' || semester || '_' || year, entry_number, extra_credits_required
+    );
+END
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION student_course_registration_trigger (
 ) RETURNS TRIGGER AS $$
 DECLARE
     total_credits INT;
-    average FLOAT;
+    maximum_credit_limit FLOAT;
     past_credits RECORD;
     current_user VARCHAR(15);
 BEGIN
@@ -67,10 +103,9 @@ BEGIN
             total_credits := total_credits + student_course.credits
         END LOOP
 
-        SELECT * INTO past_credits FROM student_past_semester_credits WHERE entry_number = %I;
-        average := (past_credits.last_semester + past_credits.second_last_semester) / 2;
+        SELECT maximum_credits_allowed INTO maximum_credit_limit FROM student_credit_info WHERE entry_number = %I;
 
-        IF ((total_credits + NEW.credits) > average) THEN
+        IF ((total_credits + NEW.credits) > maximum_credit_limit) THEN
             RAISE EXCEPTION ''You have exceeded the maximum credits limit.'' USING ERRCODE = ''FATAL''
         END IF
 
@@ -172,37 +207,12 @@ BEGIN
         );', 'student_ticket_table_' || entry_number
     );
 
-
-    -- EXECUTE format (
-    --     'GRANT SELECT ON %I TO %I', 
-    --     'student_past_courses_' || entry_number, entry_number
-    -- );
-
-    -- EXECUTE format (
-    --     'GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO %I', 
-    --     'student_current_courses_' || entry_number, entry_number
-    -- );
-
-    -- EXECUTE format (
-    --     'GRANT SELECT, INSERT ON %I TO %I', 
-    --     'student_ticket_table_' || entry_number, entry_number
-    -- );
-
-    -- what if there are not last semester and second last semester?
-    -- take the course id
-    -- check if the course is in the course_catalog
-    -- check the credits of the course
-
     EXECUTE format (
         'CREATE TRIGGER student_course_registration_trigger_%I
         BEFORE INSERT ON student_current_courses_%I
         FOR EACH ROW
         EXECUTE PROCEDURE student_course_registration_trigger()', entry_number, entry_number
     );
-
-    -- check cgpa criteria
-
-
 END
 $$ LANGUAGE plpgsql;
 
@@ -210,7 +220,6 @@ CREATE OR REPLACE FUNCTION faculty_registration (
     IN faculty_id INT
 ) RETURNS VOID AS $$
 BEGIN
-
     -- make a new user with faculty id
     EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', faculty_id);
 
@@ -220,7 +229,7 @@ BEGIN
             course_id VARCHAR(15) NOT NULL,
             semester INT NOT NULL,
             year INT NOT NULL,
-            time_slots INT [] NOT NULL,
+            time_slots INT [] NOT NULL
         );', 'course_offering_' || faculty_id
     );
 
@@ -233,12 +242,6 @@ BEGIN
             status VARCHAR(255) NOT NULL
         );', 'FA_ticket_table_' || faculty_id
     );
-
-    -- EXECUTE format (
-    --     'GRANT SELECT, UPDATE, INSERT, DELETE ON %I TO %I', 
-    --     'course_offering_' || faculty_id, faculty_id
-    -- );
-
 END
 $$ LANGUAGE plpgsql;
 
@@ -274,11 +277,6 @@ BEGIN
         );', faculty_id || '_' || course_id || '_' || semester || '_' || year
     );
 
-    -- EXECUTE format (
-    --     'GRANT SELECT, UPDATE, INSERT, DELETE ON %I TO %I', 
-    --     faculty_id || '_' || course_id || '_' || semester || '_' || year, faculty_id
-    -- );
-
 END
 $$ LANGUAGE plpgsql;
 
@@ -300,12 +298,6 @@ BEGIN
         'INSERT INTO %I VALUES (course, branch, year_of_joining, cgpa);',
         faculty_id || '_' || course_id || '_' || semester || '_' || year
     );
-
-    -- EXECUTE format (
-    --     'GRANT SELECT, UPDATE, INSERT, DELETE ON %I TO %I', 
-    --     faculty_id || '_' || course_id || '_' || semester || '_' || year, faculty_id
-    -- );
-
 END
 $$ LANGUAGE plpgsql;
 
@@ -326,5 +318,143 @@ BEGIN
         'student_current_courses_' || entry_number        
     );
 
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION FA_acceptance (
+    IN ticket_id varchar(100),
+    IN entry_number varchar(15)
+) RETURNS VOID AS $$
+DECLARE
+    extra_credits_required FLOAT;
+    faculty_id INT;
+BEGIN
+    -- update status in student ticket table
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Awaiting dean approval"
+         WHERE ticket_id = %I;', 'student_ticket_table_' || entry_number, ticket_id
+    );
+
+    -- update status in FAs ticket table
+    SELECT CURRENT_USER INTO faculty_id;
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Approved"
+         WHERE ticket_id = %I;', 'FA_ticket_table_' || faculty_id, ticket_id
+    );
+
+    -- update status in dean's ticket table
+    EXECUTE format(
+        'SELECT stt.extra_credits_required
+        FROM %I stt
+        WHERE stt.ticket_id = ticket_id INTO extra_credits_required;
+        INSERT INTO dean_ticket_table VALUES(%I, %I, %I, "Awaiting Approval");', 'student_ticket_table_' || entry_number, ticket_id, entry_number, extra_credits_required
+    );
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION FA_rejection (
+    IN ticket_id varchar(100),
+    IN entry_number varchar(15)
+) RETURNS VOID AS $$
+DECLARE
+    faculty_id INT;
+BEGIN
+    -- update status in student ticket table
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Rejected by FA"
+         WHERE ticket_id = %I;', 'student_ticket_table_' || entry_number, ticket_id
+    );
+
+    -- update status in FAs ticket table
+    SELECT CURRENT_USER INTO faculty_id;
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Rejected"
+         WHERE ticket_id = %I;', 'FA_ticket_table_' || faculty_id, ticket_id
+    );
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION dean_acceptance (
+    IN ticket_id varchar(100),
+    IN entry_number varchar(15)
+) RETURNS VOID AS $$
+BEGIN
+    -- update status in student ticket table
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Approved"
+         WHERE ticket_id = %I;', 'student_ticket_table_' || entry_number, ticket_id
+    );
+
+    -- update status in dean's table
+    EXECUTE format (
+        'UPDATE dean_ticket_table
+         SET status = "Approved"
+         WHERE ticket_id = %I;', ticket_id
+    );
+
+    -- update max credit limit for the student
+
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION dean_acceptance (
+    IN ticket_id varchar(100),
+    IN entry_number varchar(15)
+) RETURNS VOID AS $$
+DECLARE
+    extra_credits_required FLOAT;
+BEGIN
+    -- update status in student ticket table
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Approved"
+         WHERE ticket_id = %I;', 'student_ticket_table_' || entry_number, ticket_id
+    );
+
+    -- update status in dean's table
+    EXECUTE format (
+        'UPDATE dean_ticket_table
+         SET status = "Approved"
+         WHERE ticket_id = %I;', ticket_id
+    );
+
+    EXECUTE format(
+        'SELECT stt.extra_credits_required
+        FROM %I stt
+        WHERE stt.ticket_id = ticket_id INTO extra_credits_required',
+        'student_ticket_table_' || entry_number
+    )
+    -- update max credit limit for the student
+    EXECUTE format (
+        'UPDATE student_credit_info
+         SET maximum_credits = maximum_credits + extra_credits_required
+         WHERE entry_number = %I;', entry_number
+    );
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION dean_rejection (
+    IN ticket_id varchar(100),
+    IN entry_number varchar(15)
+) RETURNS VOID AS $$
+BEGIN
+    -- update status in student ticket table
+    EXECUTE format (
+        'UPDATE %I 
+         SET status = "Rejected by dean"
+         WHERE ticket_id = %I;', 'student_ticket_table_' || entry_number, ticket_id
+    );
+
+    -- update status in dean's table
+    EXECUTE format (
+        'UPDATE dean_ticket_table
+         SET status = "Rejected"
+         WHERE ticket_id = %I;', ticket_id
+    );
 END
 $$ LANGUAGE plpgsql;
