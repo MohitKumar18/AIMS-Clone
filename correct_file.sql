@@ -111,65 +111,69 @@ BEGIN
     SELECT CURRENT_USER INTO current_user;
 
     total_credits := 0;
+    -- this loop will count total_credits
+    FOR student_course IN 
+        EXECUTE format('SELECT * FROM %I', 'student_course_table_' || current_user)
+    LOOP
+        SELECT credits 
+        FROM course_catalog 
+        WHERE student_course.course_id = course_catalog.course_id INTO course_credits;
+        total_credits := total_credits + course_credits
+    END LOOP;
+
+    -- extracting maximum credit limit
     EXECUTE format (
-        '
-        -- this loop will count total_credits
-        FOR student_course IN SELECT * FROM %I
+        'SELECT maximum_credits_allowed INTO maximum_credit_limit FROM student_credit_info WHERE entry_number = %I;',
+        entry_number
+    );
+
+    -- checking if the limit is satisfied
+    IF ((total_credits + NEW.credits) > maximum_credit_limit) THEN
+        RAISE EXCEPTION 'You have exceeded the maximum credits limit.' USING ERRCODE = ''FATAL''
+    END IF;
+
+    -- checking the cg criteria
+    FOR student_batch IN 
+        SELECT * FROM student_database WHERE entry_number = %I;
+    LOOP
+        FOR batches IN 
+            SELECT * FROM %I
         LOOP
-            SELECT credits 
-            FROM course_catalog 
-            WHERE student_course.course_id = course_catalog.course_id INTO course_credits;
-            total_credits := total_credits + course_credits
-        END LOOP;
-
-        -- extracting maximum credit limit
-        SELECT maximum_credits_allowed INTO maximum_credit_limit FROM student_credit_info WHERE entry_number = %I;
-
-        -- checking if the limit is satisfied
-        IF ((total_credits + NEW.credits) > maximum_credit_limit) THEN
-            RAISE EXCEPTION ''You have exceeded the maximum credits limit.'' USING ERRCODE = ''FATAL''
-        END IF;
-
-        -- checking the cg criteria
-        FOR student_batch IN SELECT * FROM student_database WHERE entry_number = %I;
-        LOOP
-            FOR batches IN SELECT * FROM %I
-            LOOP
-                IF batches.year = student_batch.year AND batches.course = student_batch.course AND batches.branch = student_batch.branch THEN
-                    IF batches.cg > student_batch.cg THEN
-                        RAISE EXCEPTION ''You dont satisfy the cg criteria'' USING ERRCODE = ''FATAL''
-                    END IF;
+            IF batches.year = student_batch.year AND batches.course = student_batch.course AND batches.branch = student_batch.branch THEN
+                IF batches.cg > student_batch.cg THEN
+                    RAISE EXCEPTION 'You dont satisfy the cg criteria' USING ERRCODE = ''FATAL''
                 END IF;
-            END LOOP;
-
-            -- if the batch doesnt exist
-            IF (NOT EXISTS(SELECT * 
-                FROM %I 
-                WHERE year = student_batch.year AND 
-                course = student_batch.course AND 
-                branch = student_batch.branch)) THEN
-                RAISE EXCEPTION ''Your batch is not allowed to register for this course'' USING ERRCODE = ''FATAL''
             END IF;
         END LOOP;
 
-        SELECT time_slots FROM course_offering WHERE course_id = NEW.course_id AND faculty_id = NEW.faculty_id AND semester = NEW.semester AND year = NEW.year INTO new_slots;
+        -- if the batch doesnt exist
+        IF (NOT EXISTS (
+            SELECT * 
+            FROM %I 
+            WHERE year = student_batch.year AND 
+            course = student_batch.course AND 
+            branch = student_batch.branch)) THEN
+            RAISE EXCEPTION ''Your batch is not allowed to register for this course'' USING ERRCODE = ''FATAL''
+        END IF;
+    END LOOP;
 
-        FOR courses IN SELECT * FROM %I
+    SELECT time_slots FROM course_offering WHERE course_id = NEW.course_id AND faculty_id = NEW.faculty_id AND semester = NEW.semester AND year = NEW.year INTO new_slots;
+
+    FOR courses IN SELECT * FROM %I
+    LOOP
+        FOR courses_time_slot IN SELECT time_slot FROM course_offering WHERE course_id = courses.course_id
         LOOP
-            FOR courses_time_slot IN SELECT time_slot FROM course_offering WHERE course_id = courses.course_id
+            FOREACH slot IN ARRAY courses_time_slot
             LOOP
-                FOREACH slot IN ARRAY courses_time_slot
+                FOREACH new_slot IN ARRAY new_slots
                 LOOP
-                    FOREACH new_slot IN ARRAY new_slots
-                    LOOP
-                        IF new_slot = slot THEN
-                            RAISE EXCEPTION ''This course have time overlap with some other registered course'' USING ERRCODE = ''FATAL''
-                        END IF;
-                    END LOOP;
+                    IF new_slot = slot THEN
+                        RAISE EXCEPTION ''This course have time overlap with some other registered course'' USING ERRCODE = ''FATAL''
+                    END IF;
                 END LOOP;
             END LOOP;
-        END LOOP;', 'student_current_courses_' || current_user, current_user, current_user, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, 'student_current_courses_' || current_user
-    );
+        END LOOP;
+    END LOOP;
 END
 $$ LANGUAGE plpgsql;
 
