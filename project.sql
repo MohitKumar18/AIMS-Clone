@@ -53,26 +53,23 @@ CREATE OR REPLACE FUNCTION student_course_registration_trigger (
 ) RETURNS TRIGGER AS $$
 DECLARE
     total_credits INT;
-    average FLOAT;
     past_credits RECORD;
     current_user VARCHAR(15);
 BEGIN
     SELECT CURRENT_USER INTO current_user;
+    total_credits := 0;
 
     EXECUTE format (
-        'total_credits := 0
-
-        FOR student_course IN SELECT * FROM  student_current_courses_%I
+        'FOR student_course IN SELECT * FROM  student_current_courses_%I
         LOOP
             total_credits := total_credits + student_course.credits
-        END LOOP
+        END LOOP;
 
         SELECT * INTO past_credits FROM student_past_semester_credits WHERE entry_number = %I;
-        average := (past_credits.last_semester + past_credits.second_last_semester) / 2;
 
         IF ((total_credits + NEW.credits) > average) THEN
             RAISE EXCEPTION ''You have exceeded the maximum credits limit.'' USING ERRCODE = ''FATAL''
-        END IF
+        END IF;
 
         FOR student_batch IN SELECT * FROM student_database WHERE entry_number = %I;
         LOOP
@@ -81,17 +78,14 @@ BEGIN
                 IF batches.year = student_batch.year AND batches.course = student_batch.course AND batches.branch = student_batch.branch THEN
                     IF batches.cg > student_batch.cg THEN
                         RAISE EXCEPTION ''You dont satisfy the cg criteria'' USING ERRCODE = ''FATAL''
-                    END IF
-
-                END IF
-
-            END LOOP
+                    END IF;
+                END IF;
+            END LOOP;
 
             IF (SELECT * FROM %I WHERE year = student_batch.year AND course = student_batch.course AND branch = student_batch.branch = NULL) THEN
                 RAISE EXCEPTION ''Your batch is not allowed to register for this course'' USING ERRCODE = ''FATAL''
-            END IF
-
-        END LOOP
+            END IF;
+        END LOOP;
 
         SELECT time_slots FROM course_offering WHERE course_id = NEW.course_id AND faculty_id = NEW.faculty_id AND semester = NEW.semester AND year = NEW.year INTO new_slots;
 
@@ -105,15 +99,11 @@ BEGIN
                     LOOP
                         IF new_slot = slot THEN
                             RAISE EXCEPTION ''This course have time overlap with some other registered course'' USING ERRCODE = ''FATAL''
-                        END IF
-
-                    END LOOP
-
-                END LOOP
-
-            END LOOP
-
-        END LOOP', current_user, current_user, current_user, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, 'student_current_courses_' || current_user
+                        END IF;
+                    END LOOP;
+                END LOOP;
+            END LOOP;
+        END LOOP;', current_user, current_user, current_user, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, NEW.faculty_id || '_' || NEW.course_id || '_' || NEW.semester || '_' || NEW.year, 'student_current_courses_' || current_user
     );
 END
 $$ LANGUAGE plpgsql;
@@ -319,11 +309,11 @@ DECLARE
     entry_number VARCHAR(15);
 BEGIN
     -- add the course offering to common course offering table
-    SELECT CURRENT_USER AS entry_number;
+    SELECT CURRENT_USER INTO entry_number;
 
     EXECUTE format (
-        'INSERT INTO %I VALUES (faculty_id, course_id, semester, year);',
-        'student_current_courses_' || entry_number        
+        'INSERT INTO %I VALUES (%L, %L, %L, %L);',
+        'student_current_courses_' || entry_number, faculty_id, course_id, semester, year     
     );
 
 END
