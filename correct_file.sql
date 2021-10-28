@@ -68,6 +68,24 @@ CREATE TABLE dean_ticket_table (
     status VARCHAR(255)
 );
 
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_database TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO acads_office;
+
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_database TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO dean_acads;
+GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO dean_acads;
+
 CREATE OR REPLACE FUNCTION student_ticket_generator (
     IN extra_credits_required INT,
     IN semester INT,
@@ -79,7 +97,6 @@ DECLARE
     student RECORD;
 BEGIN
     -- add ticket to student ticket table
-
     SELECT CURRENT_USER INTO entry_number;
 
     EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L, %L);', 'student_ticket_table_' || entry_number, entry_number || '_' || semester || '_' || year, extra_credits_required, semester, year, 'Awaiting FA Approval');
@@ -94,7 +111,7 @@ BEGIN
 
     EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L);', 'FA_ticket_table_' || faculty_id, entry_number || '_' || semester || '_' || year, entry_number, extra_credits_required, 'Awaiting Approval');
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION student_course_registration_trigger (
 ) RETURNS TRIGGER AS $$
@@ -200,7 +217,7 @@ BEGIN
 
     RETURN NULL;
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION student_registration (
     IN first_name VARCHAR(100),
@@ -234,6 +251,10 @@ BEGIN
         );', 'student_past_courses_' || entry_number
     );
 
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_past_courses_' || entry_number, entry_number);
+
     -- make a table for current courses of this student
     EXECUTE format (
         'CREATE TABLE %I (
@@ -243,6 +264,10 @@ BEGIN
             year INT NOT NULL
         );', 'student_current_courses_' || entry_number
     );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_current_courses_' || entry_number, entry_number);
 
     -- make a table for ticket for this student
     -- ticket id = entry number_semester_year
@@ -256,6 +281,10 @@ BEGIN
         );', 'student_ticket_table_' || entry_number
     );
 
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_ticket_table_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_ticket_table_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_ticket_table_' || entry_number, entry_number);
+
     EXECUTE format (
         'CREATE TRIGGER %I
         BEFORE INSERT ON %I
@@ -265,7 +294,7 @@ BEGIN
         RETURN NULL;', 'student_course_registration_trigger_' || entry_number, 'student_current_courses_' || entry_number
     );
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION faculty_registration (
     IN faculty_id INT,
@@ -289,6 +318,10 @@ BEGIN
         );', 'course_offering_' || faculty_id
     );
 
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "dean_acads"', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "acads_office"', 'course_offering_' || faculty_id, faculty_id);
+
     -- make a table for FA
     EXECUTE format (
         'CREATE TABLE %I (
@@ -298,8 +331,13 @@ BEGIN
             status VARCHAR(255) NOT NULL
         );', 'FA_ticket_table_' || faculty_id
     );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'FA_ticket_table_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "dean_acads"', 'FA_ticket_table_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "acads_office"', 'FA_ticket_table_' || faculty_id, faculty_id);
+
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION faculty_course_offering_table (
     IN course_id VARCHAR(15),
@@ -333,14 +371,19 @@ BEGIN
         );', offering_id
     );
 
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
+
     EXECUTE format (
         'CREATE TABLE %I (
             course_id VARCHAR(10) NOT NULL,
         );', offering_id || '_prereq'
     );
 
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
+
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION batchwise_cg_criteria (
     IN course_id VARCHAR(15),
@@ -361,7 +404,7 @@ BEGIN
         faculty_id || '_' || course_id || '_' || semester || '_' || year, course, branch, year_of_joining, cgpa
     );
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION student_course_registration (
     IN faculty_id INT,
@@ -381,7 +424,7 @@ BEGIN
     );
 
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION FA_acceptance (
     IN ticket_id varchar(100),
@@ -417,7 +460,7 @@ BEGIN
         'INSERT INTO dean_ticket_table VALUES(%L, %L, %L, %L)', ticket_id, entry_number, extra_credits_required, 'Awaiting Approval'
     );
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION FA_rejection (
     IN ticket_id varchar(100),
@@ -441,7 +484,7 @@ BEGIN
          WHERE ticket_id = %L;', 'FA_ticket_table_' || faculty_id, 'Rejected', ticket_id
     );
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION dean_acceptance (
     IN ticket_id varchar(255),
@@ -476,7 +519,7 @@ BEGIN
          WHERE entry_number = %L;', extra_credits_required, entry_number
     );
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION dean_rejection (
     IN ticket_id varchar(255),
@@ -496,5 +539,137 @@ BEGIN
          SET status = %L
          WHERE ticket_id = %L;', 'Rejected', ticket_id
     );
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION student_drop_course (
+    IN course_id VARCHAR(15),
+    IN faculty_id INT,
+    IN semester INT,
+    IN year INT
+) RETURNS VOID AS $$
+BEGIN
+    -- delete from student_current_courses
+    EXECUTE format (
+        'DELETE FROM %I
+         WHERE course_id = %L
+         AND faculty_id = %L
+         AND semester = %L
+         AND year = %L;', 'student_current_courses_' || CURRENT_USER, course_id, faculty_id, semester, year
+    );
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION grade_uploading (
+    IN course_id varchar(10),
+    IN file_path varchar(1000)
+) RETURN VOID AS $$
+DECLARE
+    course_entry RECORD,
+    current_course_iterator RECORD,
+    store_data_temp RECORD
+    result varchar(15)
+
+BEGIN
+    CREATE TABLE student_grade (
+        entry_number varchar(15),
+        grade int
+    );
+
+    COPY student_grade FROM file_path WITH (FORMAT csv);
+    -- agr ye na chale to
+    -- \copy student_grade FROM file_path DELIMITER ',' CSV;
+
+    FOR course_entry IN student_grade
+    LOOP
+        FOR current_course_iterator IN 
+        EXECUTE format ('student_current_courses_%I',course_entry.entry_number)
+        LOOP
+            IF current_course_iterator.course_id = course_id THEN
+                store_data_temp = current_course_iterator;
+                exit;
+            END IF;
+        END LOOP;
+
+        IF course_entry.grade < 5 THEN
+            result = 'Failed';
+        ELSE
+            result = 'Completed'
+        END IF;
+
+        EXECUTE format(
+            'INSERT INTO %I VALUES(%L,%L,%L,%L,%L,%L);', 'student_past_courses_' || course_entry.entry_number, store_data_temp.faculty_id, store_data_temp.course_id, store_data_temp.year, store_data_temp.semester, result, course_entry.grade
+        );
+
+        EXECUTE format('DELETE FROM %I WHERE course_id = course_id;','student_current_courses_' || course_entry.entry_number)
+       
+
+    END LOOP;
+
+    DROP TABLE student_grade;
+
+END
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION report_generation (
+    IN entry_number varchar(15),
+    IN required_semester int,
+    IN required_year int,
+    OUT student_entry_number varchar(15),
+    OUT student_name varchar(200),
+    OUT report_semester int,
+    OUT report_year int,
+    OUT credits_completed int,
+    OUT sgpa int,
+    OUT cgpa int
+) RETURN void AS $$
+DECLARE
+    course_entry RECORD,
+    temp_credits int,
+    report_entry RECORD,
+    sgpa_numerator int
+
+BEGIN
+    student_entry_number = entry_number;
+    student_name = SELECT concat(first_name, ' ', last_name) FROM student_database WHERE entry_number = student_entry_number;
+    report_semester = required_semester;
+    report_year = required_year;
+    credits_completed = 0;
+
+    CREATE TABLE student_report (
+        course_id varchar(10),
+        grade int,
+        credits int
+    );
+
+    FOR course_entry IN
+    EXECUTE format ('student_past_courses_%I', entry_number)
+    LOOP
+        IF course_entry.semester = required_semester AND course_entry.year = required_year THEN
+
+            temp_credits = 0;
+
+            IF course_entry.grade > 5 THEN
+                temp_credits = SELECT credits FROM course_catalog WHERE course_id = course_entry.course_id;
+                credits_completed = credits_completed + temp_credits;
+            END IF;
+
+            EXECUTE format (
+                'INSERT INTO student_report VALUES(%L, %L, %L);', course_entry.course_id, course_entry.grade, temp_credits
+            );
+
+        END IF; 
+    END LOOP;
+
+    sgpa_numerator = 0;
+
+    FOR report_entry IN student_report
+    LOOP
+        sgpa_numerator = sgpa_numerator + report_entry.credits * report_entry.grade;
+    END LOOP;
+
+    sgpa = sgpa_numerator / credits_completed;
+
+    --cgpa store me se uthani h
 END
 $$ LANGUAGE plpgsql;
