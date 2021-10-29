@@ -4,7 +4,7 @@ CREATE USER acads_office WITH PASSWORD 'iitropar';
 CREATE DATABASE AIMS;
 
 CREATE TABLE course_catalog (
-    course_id VARCHAR(10) UNIQUE PRIMARY KEY,
+    course_id VARCHAR(10) PRIMARY KEY,
     course_title VARCHAR(255) NOT NULL,
     lecture INT NOT NULL,
     tutorial INT NOT NULL,
@@ -14,14 +14,14 @@ CREATE TABLE course_catalog (
 );
 
 CREATE TABLE time_table_slots (
-    id INT UNIQUE PRIMARY KEY,
-    day VARCHAR(10),
-    beginning TIME,
-    ending TIME
+    id INT PRIMARY KEY,
+    day VARCHAR(10) NOT NULL,
+    beginning TIME NOT NULL,
+    ending TIME NOT NULL
 );
 
 CREATE TABLE course_offering (
-    offering_id VARCHAR(255) UNIQUE PRIMARY KEY,
+    offering_id VARCHAR(255) PRIMARY KEY,
     faculty_id INT NOT NULL,
     course_id VARCHAR(10) NOT NULL,
     semester INT NOT NULL,
@@ -30,42 +30,43 @@ CREATE TABLE course_offering (
 );
 
 CREATE TABLE student_credit_info (
-    entry_number VARCHAR(15) NOT NULL,
-    last_semester INT,
-    second_last_semester INT,
-    maximum_credits_allowed FLOAT
+    entry_number VARCHAR(15) PRIMARY KEY,
+    last_semester FLOAT,
+    second_last_semester FLOAT,
+    maximum_credits_allowed FLOAT NOT NULL
 );
 
 CREATE TABLE student_database (
-    first_name VARCHAR(100),
-    last_name VARCHAR(100),
-    entry_number VARCHAR(15),
-    course VARCHAR(100),
-    branch VARCHAR(100),
-    year INT,
-    credits_completed FLOAT,
-    cgpa FLOAT
+    entry_number VARCHAR(15) PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    course VARCHAR(100) NOT NULL,
+    branch VARCHAR(100) NOT NULL,
+    year INT NOT NULL,
+    credits_completed FLOAT NOT NULL,
+    cgpa FLOAT NOT NULL
 );
 
 CREATE TABLE faculty_database (
     faculty_id INT PRIMARY KEY,
-    first_name varchar(100),
-    last_name varchar(100),
-    department varchar(100)
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    department VARCHAR(100) NOT NULL
 );
 
 CREATE TABLE batchwise_FA_list (
     course VARCHAR(100),
     branch VARCHAR(100),
     year INT,
-    faculty_id INT
+    faculty_id INT,
+    PRIMARY KEY (course, branch, year)
 );
 
 CREATE TABLE dean_ticket_table (
     ticket_id VARCHAR(255) PRIMARY KEY,
-    entry_number VARCHAR(15),
-    extra_credits_required FLOAT,
-    status VARCHAR(255)
+    entry_number VARCHAR(15) NOT NULL,
+    extra_credits_required FLOAT NOT NULL,
+    status VARCHAR(255) NOT NULL
 );
 
 GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO acads_office;
@@ -247,7 +248,8 @@ BEGIN
             year INT NOT NULL,
             semester INT NOT NULL,
             status VARCHAR(255) NOT NULL,
-            grade INT NOT NULL
+            grade INT NOT NULL,
+            PRIMARY KEY (faculty_id, course_id, year, semester)
         );', 'student_past_courses_' || entry_number
     );
 
@@ -258,10 +260,11 @@ BEGIN
     -- make a table for current courses of this student
     EXECUTE format (
         'CREATE TABLE %I (
-            faculty_id INT NOT NULL,
-            course_id VARCHAR(10) NOT NULL,
-            semester INT NOT NULL,
-            year INT NOT NULL
+            faculty_id INT,
+            course_id VARCHAR(10),
+            semester INT,
+            year INT,
+            PRIMARY KEY (faculty_id, course_id, semester, year)
         );', 'student_current_courses_' || entry_number
     );
 
@@ -273,7 +276,7 @@ BEGIN
     -- ticket id = entry number_semester_year
     EXECUTE format (
         'CREATE TABLE %I (
-            ticket_id VARCHAR(255) NOT NULL,
+            ticket_id VARCHAR(255) PRIMARY KEY,
             extra_credits_required FLOAT NOT NULL,
             semester INT NOT NULL,
             year INT NOT NULL,
@@ -311,10 +314,11 @@ BEGIN
     -- make a table for course offering of this faculty
     EXECUTE format (
         'CREATE TABLE %I (
-            course_id VARCHAR(15) NOT NULL,
-            semester INT NOT NULL,
-            year INT NOT NULL,
-            time_slots INT [] NOT NULL
+            course_id VARCHAR(15),
+            semester INT,
+            year INT,
+            time_slots INT [] NOT NULL,
+            PRIMARY KEY (course_id, semester, year)
         );', 'course_offering_' || faculty_id
     );
 
@@ -325,7 +329,7 @@ BEGIN
     -- make a table for FA
     EXECUTE format (
         'CREATE TABLE %I (
-            ticket_id VARCHAR(255) NOT NULL,
+            ticket_id VARCHAR(255) PRIMARY KEY,
             entry_number VARCHAR(15) NOT NULL,
             extra_credits_required FLOAT NOT NULL,
             status VARCHAR(255) NOT NULL
@@ -364,11 +368,12 @@ BEGIN
     -- create a table for batchwise cg criteria
     EXECUTE format (
         'CREATE TABLE %I (
-            course VARCHAR(255) NOT NULL,
-            branch VARCHAR(255) NOT NULL,
+            course VARCHAR(100) NOT NULL,
+            branch VARCHAR(100) NOT NULL,
             year INT NOT NULL,
-            cg FLOAT NOT NULL
-        );', offering_id
+            cg FLOAT NOT NULL,
+            PRIMARY KEY (course, branch, year)
+        );', offering_id || '_batchwise_cg_criteria'
     );
 
     EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
@@ -376,8 +381,14 @@ BEGIN
 
     EXECUTE format (
         'CREATE TABLE %I (
-            course_id VARCHAR(10) NOT NULL,
+            course_id VARCHAR(10) PRIMARY KEY,
         );', offering_id || '_prereq'
+    );
+
+    EXECUTE format (
+        'CREATE TABLE %I (
+            entry_number VARCHAR(15) PRIMARY KEY,
+        );', offering_id || '_students'
     );
 
     EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
