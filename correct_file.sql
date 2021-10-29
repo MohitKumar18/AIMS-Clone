@@ -13,29 +13,6 @@ CREATE TABLE course_catalog (
     credits FLOAT NOT NULL
 );
 
-CREATE TABLE time_table_slots (
-    id INT PRIMARY KEY,
-    day VARCHAR(10) NOT NULL,
-    beginning TIME NOT NULL,
-    ending TIME NOT NULL
-);
-
-CREATE TABLE course_offering (
-    offering_id VARCHAR(255) PRIMARY KEY,
-    faculty_id INT NOT NULL,
-    course_id VARCHAR(10) NOT NULL,
-    semester INT NOT NULL,
-    year INT NOT NULL,
-    time_slot INT [] NOT NULL
-);
-
-CREATE TABLE student_credit_info (
-    entry_number VARCHAR(15) PRIMARY KEY,
-    last_semester FLOAT,
-    second_last_semester FLOAT,
-    maximum_credits_allowed FLOAT NOT NULL
-);
-
 CREATE TABLE student_database (
     entry_number VARCHAR(15) PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
@@ -54,17 +31,40 @@ CREATE TABLE faculty_database (
     department VARCHAR(100) NOT NULL
 );
 
+CREATE TABLE time_table_slots (
+    id INT PRIMARY KEY,
+    day VARCHAR(10) NOT NULL,
+    beginning TIME NOT NULL,
+    ending TIME NOT NULL
+);
+
+CREATE TABLE course_offering (
+    offering_id VARCHAR(255) PRIMARY KEY,
+    faculty_id INT NOT NULL REFERENCES faculty_database(faculty_id),
+    course_id VARCHAR(10) NOT NULL REFERENCES course_catalog(course_id),
+    semester INT NOT NULL,
+    year INT NOT NULL,
+    time_slot INT [] NOT NULL
+);
+
+CREATE TABLE student_credit_info (
+    entry_number VARCHAR(15) PRIMARY KEY REFERENCES student_database(entry_number),
+    last_semester FLOAT,
+    second_last_semester FLOAT,
+    maximum_credits_allowed FLOAT NOT NULL
+);
+
 CREATE TABLE batchwise_FA_list (
     course VARCHAR(100),
     branch VARCHAR(100),
     year INT,
-    faculty_id INT,
+    faculty_id INT REFERENCES faculty_database(faculty_id),
     PRIMARY KEY (course, branch, year)
 );
 
 CREATE TABLE dean_ticket_table (
     ticket_id VARCHAR(255) PRIMARY KEY,
-    entry_number VARCHAR(15) NOT NULL,
+    entry_number VARCHAR(15) NOT NULL REFERENCES student_database(entry_number),
     extra_credits_required FLOAT NOT NULL,
     status VARCHAR(255) NOT NULL
 );
@@ -243,8 +243,8 @@ BEGIN
     -- make a table for past courses of this student
     EXECUTE format (
         'CREATE TABLE %I (
-            faculty_id INT NOT NULL,
-            course_id VARCHAR(10) NOT NULL,
+            faculty_id INT NOT NULL REFERENCES faculty_database(faculty_id),
+            course_id VARCHAR(10) NOT NULL REFERENCES course_catalog(course_id),
             year INT NOT NULL,
             semester INT NOT NULL,
             status VARCHAR(255) NOT NULL,
