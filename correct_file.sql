@@ -438,8 +438,8 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION FA_acceptance (
-    IN ticket_id varchar(100),
-    IN entry_number varchar(15)
+    IN ticket_id VARCHAR(100),
+    IN entry_number VARCHAR(15)
 ) RETURNS VOID AS $$
 DECLARE
     extra_credits_required FLOAT;
@@ -474,8 +474,8 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION FA_rejection (
-    IN ticket_id varchar(100),
-    IN entry_number varchar(15)
+    IN ticket_id VARCHAR(100),
+    IN entry_number VARCHAR(15)
 ) RETURNS VOID AS $$
 DECLARE
     faculty_id INT;
@@ -498,8 +498,8 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION dean_acceptance (
-    IN ticket_id varchar(255),
-    IN entry_number varchar(15)
+    IN ticket_id VARCHAR(255),
+    IN entry_number VARCHAR(15)
 ) RETURNS VOID AS $$
 DECLARE
     extra_credits_required FLOAT;
@@ -533,8 +533,8 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION dean_rejection (
-    IN ticket_id varchar(255),
-    IN entry_number varchar(15)
+    IN ticket_id VARCHAR(255),
+    IN entry_number VARCHAR(15)
 ) RETURNS VOID AS $$
 BEGIN
     -- update status in student ticket table
@@ -572,33 +572,33 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION grade_uploading (
-    IN course_id varchar(10),
-    IN file_path varchar(1000)
+    IN course_id VARCHAR(10),
+    IN file_path VARCHAR(1000)
 ) RETURN VOID AS $$
 DECLARE
     course_entry RECORD,
     current_course_iterator RECORD,
     store_data_temp RECORD
-    result varchar(15)
-
+    result VARCHAR(15)
 BEGIN
     CREATE TABLE student_grade (
-        entry_number varchar(15),
-        grade int
+        entry_number VARCHAR(15),
+        grade INT
     );
 
     COPY student_grade FROM file_path WITH (FORMAT csv);
     -- agr ye na chale to
     -- \copy student_grade FROM file_path DELIMITER ',' CSV;
 
-    FOR course_entry IN student_grade
+    FOR course_entry IN 
+        SELECT * FROM student_grade
     LOOP
         FOR current_course_iterator IN 
-        EXECUTE format ('student_current_courses_%I',course_entry.entry_number)
+            EXECUTE format ('SELECT * FROM %I', 'student_current_courses_' || course_entry.entry_number)
         LOOP
             IF current_course_iterator.course_id = course_id THEN
                 store_data_temp = current_course_iterator;
-                exit;
+                EXIT;
             END IF;
         END LOOP;
 
@@ -608,60 +608,56 @@ BEGIN
             result = 'Completed'
         END IF;
 
-        EXECUTE format(
-            'INSERT INTO %I VALUES(%L,%L,%L,%L,%L,%L);', 'student_past_courses_' || course_entry.entry_number, store_data_temp.faculty_id, store_data_temp.course_id, store_data_temp.year, store_data_temp.semester, result, course_entry.grade
+        EXECUTE format (
+            'INSERT INTO %I VALUES(%L, %L, %L, %L, %L, %L);', 'student_past_courses_' || course_entry.entry_number, store_data_temp.faculty_id, store_data_temp.course_id, store_data_temp.year, store_data_temp.semester, result, course_entry.grade
         );
 
-        EXECUTE format('DELETE FROM %I WHERE course_id = course_id;','student_current_courses_' || course_entry.entry_number)
-       
+        EXECUTE format ('DELETE FROM %I WHERE course_id = %L;','student_current_courses_' || course_entry.entry_number, course_id);
 
     END LOOP;
-
     DROP TABLE student_grade;
-
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION report_generation (
-    IN entry_number varchar(15),
-    IN required_semester int,
-    IN required_year int,
-    OUT student_entry_number varchar(15),
-    OUT student_name varchar(200),
-    OUT report_semester int,
-    OUT report_year int,
-    OUT credits_completed int,
-    OUT sgpa int,
-    OUT cgpa int
+    IN entry_number VARCHAR(15),
+    IN required_semester INT,
+    IN required_year INT,
+    OUT student_entry_number VARCHAR(15),
+    OUT student_name VARCHAR(200),
+    OUT report_semester INT,
+    OUT report_year INT,
+    OUT credits_completed FLOAT,
+    OUT sgpa FLOAT,
+    OUT cgpa FLOAT
 ) RETURN void AS $$
 DECLARE
     course_entry RECORD,
-    temp_credits int,
+    temp_credits FLOAT,
     report_entry RECORD,
-    sgpa_numerator int
-
+    sgpa_numerator FLOAT
 BEGIN
     student_entry_number = entry_number;
-    student_name = SELECT concat(first_name, ' ', last_name) FROM student_database WHERE entry_number = student_entry_number;
+    EXECUTE format ('SELECT concat(first_name, ' ', last_name) FROM student_database WHERE entry_number = %L', student_entry_number) INTO student_name;
     report_semester = required_semester;
     report_year = required_year;
     credits_completed = 0;
 
     CREATE TABLE student_report (
-        course_id varchar(10),
-        grade int,
-        credits int
+        course_id VARCHAR(10),
+        grade INT,
+        credits INT
     );
 
     FOR course_entry IN
-    EXECUTE format ('student_past_courses_%I', entry_number)
+        EXECUTE format ('SELECT * FROM %I', 'student_past_courses_' || entry_number)
     LOOP
         IF course_entry.semester = required_semester AND course_entry.year = required_year THEN
 
             temp_credits = 0;
 
             IF course_entry.grade > 5 THEN
-                temp_credits = SELECT credits FROM course_catalog WHERE course_id = course_entry.course_id;
+                SELECT credits FROM course_catalog WHERE course_id = course_entry.course_id INTO temp_credits;
                 credits_completed = credits_completed + temp_credits;
             END IF;
 
@@ -674,7 +670,8 @@ BEGIN
 
     sgpa_numerator = 0;
 
-    FOR report_entry IN student_report
+    FOR report_entry IN 
+        SELECT * FROM student_report
     LOOP
         sgpa_numerator = sgpa_numerator + report_entry.credits * report_entry.grade;
     END LOOP;
@@ -683,4 +680,4 @@ BEGIN
 
     --cgpa store me se uthani h
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
