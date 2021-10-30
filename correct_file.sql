@@ -1,5 +1,5 @@
-CREATE USER dean_acads WITH PASSWORD 'iitropar';
-CREATE USER acads_office WITH PASSWORD 'iitropar';
+CREATE USER dean_academics WITH PASSWORD 'iitropar';
+CREATE USER academics_office WITH PASSWORD 'iitropar';
 
 CREATE DATABASE AIMS;
 
@@ -25,14 +25,14 @@ CREATE TABLE student_database (
 );
 
 CREATE TABLE faculty_database (
-    faculty_id INT PRIMARY KEY,
+    faculty_id SERIAL PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     department VARCHAR(100) NOT NULL
 );
 
 CREATE TABLE time_table_slots (
-    id INT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     day VARCHAR(10) NOT NULL,
     beginning TIME NOT NULL,
     ending TIME NOT NULL
@@ -55,10 +55,10 @@ CREATE TABLE student_credit_info (
 );
 
 CREATE TABLE batchwise_FA_list (
-    course VARCHAR(100),
-    branch VARCHAR(100),
-    year INT,
-    faculty_id INT REFERENCES faculty_database(faculty_id),
+    course VARCHAR(100) NOT NULL,
+    branch VARCHAR(100) NOT NULL,
+    year INT NOT NULL,
+    faculty_id INT REFERENCES faculty_database(faculty_id) NOT NULL,
     PRIMARY KEY (course, branch, year)
 );
 
@@ -87,30 +87,179 @@ GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO dean_acads;
 GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO dean_acads;
 GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO dean_acads;
 
-CREATE OR REPLACE FUNCTION student_ticket_generator (
-    IN extra_credits_required INT,
+CREATE OR REPLACE FUNCTION student_registration (
+    IN first_name VARCHAR(100),
+    IN last_name VARCHAR(100),
+    IN entry_number VARCHAR(15),
+    IN course VARCHAR(100),
+    IN branch VARCHAR(100),
+    IN year INT,
+    IN credits_completed FLOAT,
+    IN cgpa FLOAT
+) RETURNS VOID AS $$
+BEGIN
+
+    -- make a new user with student entry number
+    EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', entry_number);
+
+    -- add this in past semester credits table
+    INSERT INTO student_credit_info VALUES (entry_number, NULL, NULL, NULL);
+
+    INSERT INTO student_database VALUES (first_name, last_name, entry_number, course, branch, year, credits_completed, cgpa);
+
+    -- make a table for past courses of this student
+    EXECUTE format (
+        'CREATE TABLE %I (
+            faculty_id INT NOT NULL REFERENCES faculty_database(faculty_id),
+            course_id VARCHAR(10) NOT NULL REFERENCES course_catalog(course_id),
+            year INT NOT NULL,
+            semester INT NOT NULL,
+            status VARCHAR(255) NOT NULL,
+            grade INT NOT NULL,
+            PRIMARY KEY (faculty_id, course_id, year, semester)
+        );', 'student_past_courses_' || entry_number
+    );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_past_courses_' || entry_number, entry_number);
+
+    -- make a table for current courses of this student
+    EXECUTE format (
+        'CREATE TABLE %I (
+            faculty_id INT REFERENCES faculty_database(faculty_id),
+            course_id VARCHAR(10) REFERENCES course_catalog(course_id),
+            semester INT,
+            year INT,
+            PRIMARY KEY (faculty_id, course_id, semester, year)
+        );', 'student_current_courses_' || entry_number
+    );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_current_courses_' || entry_number, entry_number);
+
+    -- make a table for ticket for this student
+    -- ticket id = entry number_semester_year
+    EXECUTE format (
+        'CREATE TABLE %I (
+            ticket_id VARCHAR(255) PRIMARY KEY,
+            extra_credits_required FLOAT NOT NULL,
+            semester INT NOT NULL,
+            year INT NOT NULL,
+            status VARCHAR(255) NOT NULL
+        );', 'student_ticket_table_' || entry_number
+    );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_ticket_table_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_ticket_table_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_ticket_table_' || entry_number, entry_number);
+
+    EXECUTE format (
+        'CREATE TRIGGER %I
+        BEFORE INSERT ON %I
+        FOR EACH ROW
+        EXECUTE PROCEDURE student_course_registration_trigger()
+        END LOOP;   
+        RETURN NULL;', 'student_course_registration_trigger_' || entry_number, 'student_current_courses_' || entry_number
+    );
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION faculty_registration (
+    IN faculty_id INT,
+    IN first_name VARCHAR(100),
+    IN last_name VARCHAR(100),
+    IN department VARCHAR(100)
+) RETURNS VOID AS $$
+BEGIN
+    -- make a new user with faculty id
+    EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', faculty_id);
+
+    INSERT INTO faculty_database VALUES (faculty_id, first_name, last_name, department);
+
+    -- make a table for course offering of this faculty
+    EXECUTE format (
+        'CREATE TABLE %I (
+            course_id VARCHAR(15) REFERENCES course_catalog(course_id),
+            semester INT,
+            year INT,
+            time_slots INT [] NOT NULL,
+            PRIMARY KEY (course_id, semester, year)
+        );', 'course_offering_' || faculty_id
+    );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "dean_acads"', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "acads_office"', 'course_offering_' || faculty_id, faculty_id);
+
+    -- make a table for FA
+    EXECUTE format (
+        'CREATE TABLE %I (
+            ticket_id VARCHAR(255) PRIMARY KEY,
+            entry_number VARCHAR(15) NOT NULL REFERENCES student_database(entry_number),
+            extra_credits_required FLOAT NOT NULL,
+            status VARCHAR(255) NOT NULL
+        );', 'FA_ticket_table_' || faculty_id
+    );
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'FA_ticket_table_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "dean_acads"', 'FA_ticket_table_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "acads_office"', 'FA_ticket_table_' || faculty_id, faculty_id);
+
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION faculty_course_offering_table (
+    IN course_id VARCHAR(15),
     IN semester INT,
-    IN year INT
+    IN year INT,
+    IN time_slots INT []
 ) RETURNS VOID AS $$
 DECLARE
-    entry_number VARCHAR(15);
     faculty_id INT;
-    student RECORD;
+    offering_id VARCHAR(255);
 BEGIN
-    -- add ticket to student ticket table
-    SELECT CURRENT_USER INTO entry_number;
+    -- add the course offering to common course offering table
+    SELECT CURRENT_USER INTO faculty_id;
+    SELECT faculty_id || '_' || course_id || '_' || semester || '_' || year INTO offering_id;
 
-    EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L, %L);', 'student_ticket_table_' || entry_number, entry_number || '_' || semester || '_' || year, extra_credits_required, semester, year, 'Awaiting FA Approval');
+    INSERT INTO course_offering VALUES (offering_id, faculty_id, course_id, semester, year, time_slots);
 
-    EXECUTE format ('SELECT l.faculty_id FROM student_database s, batchwise_FA_list l WHERE s.entry_number = %L and l.branch = s.branch and l.year = s.year and l.course = s.course', entry_number) INTO faculty_id;
-    -- add ticket to FA's table
-    FOR student IN
-        EXECUTE format ('SELECT * FROM student_database WHERE entry_number = %L', entry_number)
-    LOOP
-        EXECUTE format ('SELECT faculty_id FROM batchwise_FA_list WHERE course = %L and branch = %L and year = %L', student.course, student.branch, student.year) INTO faculty_id;
-    END LOOP;
+    -- add into the course offering table of the faculty
+    EXECUTE format (
+        'INSERT INTO %I VALUES (%L, %L, %L, %L);',
+        'course_offering_' || faculty_id, course_id, semester, year, time_slots
+    );
 
-    EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L);', 'FA_ticket_table_' || faculty_id, entry_number || '_' || semester || '_' || year, entry_number, extra_credits_required, 'Awaiting Approval');
+    -- create a table for batchwise cg criteria
+    EXECUTE format (
+        'CREATE TABLE %I (
+            course VARCHAR(100) NOT NULL,
+            branch VARCHAR(100) NOT NULL,
+            year INT NOT NULL,
+            cg FLOAT NOT NULL,
+            PRIMARY KEY (course, branch, year)
+        );', offering_id || '_batchwise_cg_criteria'
+    );
+
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
+
+    EXECUTE format (
+        'CREATE TABLE %I (
+            course_id VARCHAR(10) PRIMARY KEY REFERENCES course_catalog(course_id),
+        );', offering_id || '_prereq'
+    );
+
+    EXECUTE format (
+        'CREATE TABLE %I (
+            entry_number VARCHAR(15) PRIMARY KEY REFERENCES student_database(entry_number),
+        );', offering_id || '_students'
+    );
+
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
+
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -204,12 +353,11 @@ BEGIN
     END LOOP;
 
     -- checking prereq
-    SELECT count(*) FROM (
-        EXECUTE format (
-            'SELECT course_id FROM %I
-            EXCEPT
-            SELECT course_id FROM %I', 
-            new_course_offering_id || '_prereq', 'student_current_courses_' || current_user)
+    EXECUTE format ('SELECT count(*) FROM (
+        SELECT course_id FROM %I 
+        EXCEPT 
+        SELECT course_id FROM %I)', 
+        new_course_offering_id || '_prereq', 'student_current_courses_' || current_user
     ) INTO prereq_not_done;
 
     IF (prereq_not_done > 0) THEN
@@ -220,178 +368,22 @@ BEGIN
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION student_registration (
-    IN first_name VARCHAR(100),
-    IN last_name VARCHAR(100),
-    IN entry_number VARCHAR(15),
-    IN course VARCHAR(100),
-    IN branch VARCHAR(100),
-    IN year INT,
-    IN credits_completed FLOAT,
-    IN cgpa FLOAT
-) RETURNS VOID AS $$
-BEGIN
-
-    -- make a new user with student entry number
-    EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', entry_number);
-
-    -- add this in past semester credits table
-    INSERT INTO student_credit_info VALUES (entry_number, NULL, NULL, NULL);
-
-    INSERT INTO student_database VALUES (first_name, last_name, entry_number, course, branch, year, credits_completed, cgpa);
-
-    -- make a table for past courses of this student
-    EXECUTE format (
-        'CREATE TABLE %I (
-            faculty_id INT NOT NULL REFERENCES faculty_database(faculty_id),
-            course_id VARCHAR(10) NOT NULL REFERENCES course_catalog(course_id),
-            year INT NOT NULL,
-            semester INT NOT NULL,
-            status VARCHAR(255) NOT NULL,
-            grade INT NOT NULL,
-            PRIMARY KEY (faculty_id, course_id, year, semester)
-        );', 'student_past_courses_' || entry_number
-    );
-
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_past_courses_' || entry_number, entry_number);
-
-    -- make a table for current courses of this student
-    EXECUTE format (
-        'CREATE TABLE %I (
-            faculty_id INT,
-            course_id VARCHAR(10),
-            semester INT,
-            year INT,
-            PRIMARY KEY (faculty_id, course_id, semester, year)
-        );', 'student_current_courses_' || entry_number
-    );
-
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_current_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_current_courses_' || entry_number, entry_number);
-
-    -- make a table for ticket for this student
-    -- ticket id = entry number_semester_year
-    EXECUTE format (
-        'CREATE TABLE %I (
-            ticket_id VARCHAR(255) PRIMARY KEY,
-            extra_credits_required FLOAT NOT NULL,
-            semester INT NOT NULL,
-            year INT NOT NULL,
-            status VARCHAR(255) NOT NULL
-        );', 'student_ticket_table_' || entry_number
-    );
-
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_ticket_table_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_ticket_table_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_ticket_table_' || entry_number, entry_number);
-
-    EXECUTE format (
-        'CREATE TRIGGER %I
-        BEFORE INSERT ON %I
-        FOR EACH ROW
-        EXECUTE PROCEDURE student_course_registration_trigger()
-        END LOOP;   
-        RETURN NULL;', 'student_course_registration_trigger_' || entry_number, 'student_current_courses_' || entry_number
-    );
-END
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE OR REPLACE FUNCTION faculty_registration (
+CREATE OR REPLACE FUNCTION student_course_registration (
     IN faculty_id INT,
-    IN first_name VARCHAR(100),
-    IN last_name VARCHAR(100),
-    IN department VARCHAR(100)
-) RETURNS VOID AS $$
-BEGIN
-    -- make a new user with faculty id
-    EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', faculty_id);
-
-    INSERT INTO faculty_database VALUES (faculty_id, first_name, last_name, department);
-
-    -- make a table for course offering of this faculty
-    EXECUTE format (
-        'CREATE TABLE %I (
-            course_id VARCHAR(15),
-            semester INT,
-            year INT,
-            time_slots INT [] NOT NULL,
-            PRIMARY KEY (course_id, semester, year)
-        );', 'course_offering_' || faculty_id
-    );
-
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'course_offering_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "dean_acads"', 'course_offering_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "acads_office"', 'course_offering_' || faculty_id, faculty_id);
-
-    -- make a table for FA
-    EXECUTE format (
-        'CREATE TABLE %I (
-            ticket_id VARCHAR(255) PRIMARY KEY,
-            entry_number VARCHAR(15) NOT NULL,
-            extra_credits_required FLOAT NOT NULL,
-            status VARCHAR(255) NOT NULL
-        );', 'FA_ticket_table_' || faculty_id
-    );
-
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'FA_ticket_table_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "dean_acads"', 'FA_ticket_table_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "acads_office"', 'FA_ticket_table_' || faculty_id, faculty_id);
-
-END
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE OR REPLACE FUNCTION faculty_course_offering_table (
     IN course_id VARCHAR(15),
     IN semester INT,
-    IN year INT,
-    IN time_slots INT []
+    IN year INT
 ) RETURNS VOID AS $$
 DECLARE
-    faculty_id INT;
-    offering_id VARCHAR(255);
+    entry_number VARCHAR(15);
 BEGIN
     -- add the course offering to common course offering table
-    SELECT CURRENT_USER INTO faculty_id;
-    SELECT faculty_id || '_' || course_id || '_' || semester || '_' || year INTO offering_id;
+    SELECT CURRENT_USER INTO entry_number;
 
-    INSERT INTO course_offering VALUES (offering_id, faculty_id, course_id, semester, year, time_slots);
-
-    -- add into the course offering table of the faculty
     EXECUTE format (
         'INSERT INTO %I VALUES (%L, %L, %L, %L);',
-        'course_offering_' || faculty_id, course_id, semester, year, time_slots
+        'student_current_courses_' || entry_number, faculty_id, course_id, semester, year
     );
-
-    -- create a table for batchwise cg criteria
-    EXECUTE format (
-        'CREATE TABLE %I (
-            course VARCHAR(100) NOT NULL,
-            branch VARCHAR(100) NOT NULL,
-            year INT NOT NULL,
-            cg FLOAT NOT NULL,
-            PRIMARY KEY (course, branch, year)
-        );', offering_id || '_batchwise_cg_criteria'
-    );
-
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
-
-    EXECUTE format (
-        'CREATE TABLE %I (
-            course_id VARCHAR(10) PRIMARY KEY,
-        );', offering_id || '_prereq'
-    );
-
-    EXECUTE format (
-        'CREATE TABLE %I (
-            entry_number VARCHAR(15) PRIMARY KEY,
-        );', offering_id || '_students'
-    );
-
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
 
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -417,23 +409,30 @@ BEGIN
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION student_course_registration (
-    IN faculty_id INT,
-    IN course_id VARCHAR(15),
+CREATE OR REPLACE FUNCTION student_ticket_generator (
+    IN extra_credits_required INT,
     IN semester INT,
     IN year INT
 ) RETURNS VOID AS $$
 DECLARE
     entry_number VARCHAR(15);
+    faculty_id INT;
+    student RECORD;
 BEGIN
-    -- add the course offering to common course offering table
+    -- add ticket to student ticket table
     SELECT CURRENT_USER INTO entry_number;
 
-    EXECUTE format (
-        'INSERT INTO %I VALUES (%L, %L, %L, %L);',
-        'student_current_courses_' || entry_number, faculty_id, course_id, semester, year
-    );
+    EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L, %L);', 'student_ticket_table_' || entry_number, entry_number || '_' || semester || '_' || year, extra_credits_required, semester, year, 'Awaiting FA Approval');
 
+    EXECUTE format ('SELECT l.faculty_id FROM student_database s, batchwise_FA_list l WHERE s.entry_number = %L and l.branch = s.branch and l.year = s.year and l.course = s.course', entry_number) INTO faculty_id;
+    -- add ticket to FA's table
+    FOR student IN
+        EXECUTE format ('SELECT * FROM student_database WHERE entry_number = %L', entry_number)
+    LOOP
+        EXECUTE format ('SELECT faculty_id FROM batchwise_FA_list WHERE course = %L and branch = %L and year = %L', student.course, student.branch, student.year) INTO faculty_id;
+    END LOOP;
+
+    EXECUTE format ('INSERT INTO %I VALUES(%L, %L, %L, %L);', 'FA_ticket_table_' || faculty_id, entry_number || '_' || semester || '_' || year, entry_number, extra_credits_required, 'Awaiting Approval');
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
