@@ -69,23 +69,16 @@ CREATE TABLE dean_ticket_table (
     status VARCHAR(255) NOT NULL
 );
 
-GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON student_database TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO acads_office;
-GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO acads_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_database TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO academics_office;
+GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO academics_office;
 
-GRANT SELECT, INSERT, DELETE, UPDATE ON course_catalog TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON student_database TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON faculty_database TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO dean_acads;
-GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO dean_acads;
+GRANT SELECT ON course_catalog TO dean_academics;
+GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO dean_academics;
 
 CREATE OR REPLACE FUNCTION student_registration (
     IN first_name VARCHAR(100),
@@ -97,15 +90,18 @@ CREATE OR REPLACE FUNCTION student_registration (
     IN credits_completed FLOAT,
     IN cgpa FLOAT
 ) RETURNS VOID AS $$
+DECLARE
+    faculty_advisor INT;
 BEGIN
 
     -- make a new user with student entry number
     EXECUTE format ('CREATE USER %I WITH PASSWORD ''iitropar'';', entry_number);
 
     -- add this in past semester credits table
-    INSERT INTO student_credit_info VALUES (entry_number, NULL, NULL, NULL);
 
-    INSERT INTO student_database VALUES (first_name, last_name, entry_number, course, branch, year, credits_completed, cgpa);
+    INSERT INTO student_database VALUES (entry_number, first_name, last_name, course, branch, year, credits_completed, cgpa);
+
+    INSERT INTO student_credit_info VALUES (entry_number, NULL, NULL, 18);
 
     -- make a table for past courses of this student
     EXECUTE format (
@@ -121,8 +117,12 @@ BEGIN
     );
 
     EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT, INSERT, DELETE, UPDATE ON TABLE %I TO "academics_office"', 'student_past_courses_' || entry_number, entry_number);
+
+    EXECUTE format ('SELECT faculty_id FROM batchwise_FA_list WHERE course = %L AND year = %L AND branch = %L', course, year, branch) INTO faculty_advisor;
+    raise notice 'fac_id: %', faculty_advisor; 
+
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, faculty_advisor);
 
     -- make a table for current courses of this student
     EXECUTE format (
@@ -135,9 +135,9 @@ BEGIN
         );', 'student_current_courses_' || entry_number
     );
 
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_current_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT, INSERT, DELETE, UPDATE ON TABLE %I TO "academics_office"', 'student_past_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, faculty_advisor);
 
     -- make a table for ticket for this student
     -- ticket id = entry number_semester_year
@@ -152,8 +152,7 @@ BEGIN
     );
 
     EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_ticket_table_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "dean_acads"', 'student_ticket_table_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO "acads_office"', 'student_ticket_table_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT, INSERT, DELETE, UPDATE ON TABLE %I TO "academics_office"', 'student_ticket_table_' || entry_number, entry_number);
 
     EXECUTE format (
         'CREATE TRIGGER %I
@@ -189,9 +188,8 @@ BEGIN
         );', 'course_offering_' || faculty_id
     );
 
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'course_offering_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "dean_acads"', 'course_offering_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO "acads_office"', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, INSERT, DELETE ON TABLE %I TO %I', 'course_offering_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "academics_office"', 'course_offering_' || faculty_id, faculty_id);
 
     -- make a table for FA
     EXECUTE format (
@@ -204,8 +202,7 @@ BEGIN
     );
 
     EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'FA_ticket_table_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "dean_acads"', 'FA_ticket_table_' || faculty_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO "acads_office"', 'FA_ticket_table_' || faculty_id, faculty_id);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO "academics_office"', 'FA_ticket_table_' || faculty_id, faculty_id);
 
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -243,8 +240,7 @@ BEGIN
         );', offering_id || '_batchwise_cg_criteria'
     );
 
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id, faculty_id);
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_batchwise_cg_criteria', faculty_id);
 
     EXECUTE format (
         'CREATE TABLE %I (
@@ -252,13 +248,16 @@ BEGIN
         );', offering_id || '_prereq'
     );
 
+    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
+
     EXECUTE format (
         'CREATE TABLE %I (
             entry_number VARCHAR(15) PRIMARY KEY REFERENCES student_database(entry_number),
         );', offering_id || '_students'
     );
 
-    EXECUTE format ('GRANT SELECT, UPDATE, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
+    -- -- --- ---- --- make extra functions
+    EXECUTE format ('GRANT SELECT, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
 
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -573,23 +572,23 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION grade_uploading (
     IN course_id VARCHAR(10),
     IN file_path VARCHAR(1000)
-) RETURN VOID AS $$
+) RETURNS VOID AS $$
 DECLARE
-    course_entry RECORD,
-    current_course_iterator RECORD,
-    store_data_temp RECORD
-    result VARCHAR(15)
+    course_entry RECORD;
+    current_course_iterator RECORD;
+    store_data_temp RECORD;
+    result VARCHAR(15);
 BEGIN
     CREATE TABLE student_grade (
         entry_number VARCHAR(15),
         grade INT
     );
 
-    COPY student_grade FROM file_path WITH (FORMAT csv);
+    EXECUTE format ('COPY student_grade FROM %I WITH (FORMAT csv)', file_path);
     -- agr ye na chale to
     -- \copy student_grade FROM file_path DELIMITER ',' CSV;
 
-    FOR course_entry IN 
+    FOR course_entry IN
         SELECT * FROM student_grade
     LOOP
         FOR current_course_iterator IN 
@@ -604,7 +603,7 @@ BEGIN
         IF course_entry.grade < 5 THEN
             result = 'Failed';
         ELSE
-            result = 'Completed'
+            result = 'Completed';
         END IF;
 
         EXECUTE format (
@@ -627,17 +626,17 @@ CREATE OR REPLACE FUNCTION report_generation (
     OUT report_semester INT,
     OUT report_year INT,
     OUT credits_completed FLOAT,
-    OUT sgpa FLOAT,
-    OUT cgpa FLOAT
-) RETURN void AS $$
+    OUT sgpa FLOAT
+    -- OUT cgpa FLOAT
+) RETURNS RECORD AS $$
 DECLARE
-    course_entry RECORD,
-    temp_credits FLOAT,
-    report_entry RECORD,
-    sgpa_numerator FLOAT
+    course_entry RECORD;
+    temp_credits FLOAT;
+    report_entry RECORD;
+    sgpa_numerator FLOAT;
 BEGIN
     student_entry_number = entry_number;
-    EXECUTE format ('SELECT concat(first_name, ' ', last_name) FROM student_database WHERE entry_number = %L', student_entry_number) INTO student_name;
+    EXECUTE format ('SELECT first_name || " " || last_name FROM student_database WHERE entry_number = %L', student_entry_number) INTO student_name;
     report_semester = required_semester;
     report_year = required_year;
     credits_completed = 0;
@@ -664,12 +663,12 @@ BEGIN
                 'INSERT INTO student_report VALUES(%L, %L, %L);', course_entry.course_id, course_entry.grade, temp_credits
             );
 
-        END IF; 
+        END IF;
     END LOOP;
 
     sgpa_numerator = 0;
 
-    FOR report_entry IN 
+    FOR report_entry IN
         SELECT * FROM student_report
     LOOP
         sgpa_numerator = sgpa_numerator + report_entry.credits * report_entry.grade;
