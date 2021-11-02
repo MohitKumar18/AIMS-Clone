@@ -604,7 +604,7 @@ BEGIN
         grade INTEGER
     );
 
-    EXECUTE format ('copy student_grade(entry_number, grade) FROM %L DELIMITER %L CSV HEADER', file_path, ',');
+    EXECUTE format ('COPY student_grade FROM %L DELIMITER '','' CSV HEADER', file_path);
     -- agr ye na chale to
     -- \copy student_grade FROM file_path DELIMITER ',' CSV;
     EXECUTE format (
@@ -614,7 +614,6 @@ BEGIN
     FOR course_entry IN
         SELECT * FROM student_grade
     LOOP
-        raise NOTICE 'course_credits: %', course_credits;
         FOR current_course_iterator IN 
             EXECUTE format ('SELECT * FROM %I', 'student_current_courses_' || course_entry.entry_number)
         LOOP
@@ -623,8 +622,6 @@ BEGIN
                 EXIT;
             END IF;
         END LOOP;
-
-        raise notice 'entry %', course_entry.entry_number;
 
         IF course_entry.grade < 5 THEN
             result = 'Failed';
