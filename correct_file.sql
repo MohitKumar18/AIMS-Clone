@@ -271,8 +271,23 @@ BEGIN
 
     -- -- --- ---- --- make extra functions
     EXECUTE format ('GRANT SELECT, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
+    EXECUTE format ('GRANT SELECT, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_students', faculty_id);
 
 END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION set_prereq(
+    IN offering_id VARCHAR(10),
+    IN prereq_id VARCHAR(10) []
+) RETURNS VOID AS $$
+DECLARE
+    id VARCHAR(10);
+BEGIN
+    FOREACH id IN ARRAY prereq_id
+    LOOP
+        EXECUTE format ('INSERT INTO %I VALUES (%L)', offering_id || '_prereq', id);
+    END LOOP;
+END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION student_course_registration_trigger (
