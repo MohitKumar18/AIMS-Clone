@@ -6,9 +6,9 @@ CREATE DATABASE AIMS;
 CREATE TABLE course_catalog (
     course_id VARCHAR(10) PRIMARY KEY,
     course_title VARCHAR(255) NOT NULL,
-    lecture INT NOT NULL,
-    tutorial INT NOT NULL,
-    practical INT NOT NULL,
+    lecture INTEGER NOT NULL,
+    tutorial INTEGER NOT NULL,
+    practical INTEGER NOT NULL,
     self_study FLOAT NOT NULL,
     credits FLOAT NOT NULL
 );
@@ -19,7 +19,7 @@ CREATE TABLE student_database (
     last_name VARCHAR(100) NOT NULL,
     course VARCHAR(100) NOT NULL,
     branch VARCHAR(100) NOT NULL,
-    year INT NOT NULL,
+    year INTEGER NOT NULL,
     credits_completed FLOAT NOT NULL,
     cgpa FLOAT NOT NULL
 );
@@ -40,11 +40,11 @@ CREATE TABLE time_table_slots (
 
 CREATE TABLE course_offering (
     offering_id VARCHAR(255) PRIMARY KEY,
-    faculty_id INT NOT NULL REFERENCES faculty_database(faculty_id),
+    faculty_id INTEGER NOT NULL REFERENCES faculty_database(faculty_id),
     course_id VARCHAR(10) NOT NULL REFERENCES course_catalog(course_id),
-    semester INT NOT NULL,
-    year INT NOT NULL,
-    time_slot INT [] NOT NULL
+    semester INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    time_slot INTEGER [] NOT NULL
 );
 
 
@@ -58,8 +58,8 @@ CREATE TABLE student_credit_info (
 CREATE TABLE batchwise_FA_list (
     course VARCHAR(100) NOT NULL,
     branch VARCHAR(100) NOT NULL,
-    year INT NOT NULL,
-    faculty_id INT REFERENCES faculty_database(faculty_id) NOT NULL,
+    year INTEGER NOT NULL,
+    faculty_id INTEGER REFERENCES faculty_database(faculty_id) NOT NULL,
     PRIMARY KEY (course, branch, year)
 );
 
@@ -98,12 +98,12 @@ CREATE OR REPLACE FUNCTION student_registration (
     IN entry_number VARCHAR(15),
     IN course VARCHAR(100),
     IN branch VARCHAR(100),
-    IN year INT,
+    IN year INTEGER,
     IN credits_completed FLOAT,
     IN cgpa FLOAT
 ) RETURNS VOID AS $$
 DECLARE
-    faculty_advisor INT;
+    faculty_advisor INTEGER;
 BEGIN
 
     -- make a new user with student entry number
