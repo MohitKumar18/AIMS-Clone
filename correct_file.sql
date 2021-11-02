@@ -77,6 +77,8 @@ GRANT SELECT, INSERT, DELETE, UPDATE ON student_credit_info TO academics_office;
 GRANT SELECT, INSERT, DELETE, UPDATE ON time_table_slots TO academics_office;
 GRANT SELECT, INSERT, DELETE, UPDATE ON course_offering TO academics_office;
 GRANT SELECT, INSERT, DELETE, UPDATE ON batchwise_FA_list TO academics_office;
+GRANT USAGE, SELECT ON SEQUENCE time_table_slots_id_seq TO academics_office;
+GRANT USAGE, SELECT ON SEQUENCE faculty_database_id_seq TO academics_office;
 
 GRANT SELECT ON course_catalog TO dean_academics;
 GRANT SELECT, INSERT, DELETE, UPDATE ON dean_ticket_table TO dean_academics;
@@ -87,6 +89,9 @@ CREATE OR REPLACE FUNCTION add_time_table_slots (
     IN ending TIME
 ) RETURNS VOID AS $$
     BEGIN
+        IF SESSION_USER != 'academics_office' THEN
+            RAISE EXCEPTION 'Only the academics office can add time table slots.';
+        END IF;
         INSERT INTO time_table_slots (day, beginning, ending)
         VALUES (day, beginning, ending);
     END;
@@ -147,9 +152,9 @@ BEGIN
         );', 'student_current_courses_' || entry_number
     );
 
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT, INSERT, DELETE, UPDATE ON TABLE %I TO "academics_office"', 'student_past_courses_' || entry_number, entry_number);
-    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_past_courses_' || entry_number, faculty_advisor);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT, INSERT, DELETE, UPDATE ON TABLE %I TO "academics_office"', 'student_current_courses_' || entry_number, entry_number);
+    EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', 'student_current_courses_' || entry_number, faculty_advisor);
 
     -- make a table for ticket for this student
     -- ticket id = entry number_semester_year
@@ -173,6 +178,8 @@ BEGIN
         EXECUTE PROCEDURE student_course_registration_trigger();
         ', 'student_course_registration_trigger_' || entry_number, 'student_current_courses_' || entry_number
     );
+
+    EXECUTE format ('GRANT SELECT ON TABLE course_offering TO %I', entry_number);
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -229,6 +236,7 @@ DECLARE
     faculty_id_string VARCHAR(10);
     offering_id VARCHAR(255);
     session_user VARCHAR(255);
+    student_entry_number VARCHAR(15);
 BEGIN
     -- add the course offering to common course offering table
     SELECT SESSION_USER INTO faculty_id;
@@ -270,9 +278,15 @@ BEGIN
     );
 
     -- -- --- ---- --- make extra functions
-    EXECUTE format ('GRANT SELECT, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_prereq', faculty_id);
     EXECUTE format ('GRANT SELECT, DELETE, INSERT ON TABLE %I TO %I', offering_id || '_students', faculty_id);
 
+    FOR student_entry_number IN
+        SELECT entry_number FROM student_database
+    LOOP
+        EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', offering_id || '_batchwise_cg_criteria', student_entry_number);
+        EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', offering_id || '_prereq', student_entry_number);
+        EXECUTE format ('GRANT SELECT ON TABLE %I TO %I', offering_id || '_students', student_entry_number);
+    END LOOP;
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -382,8 +396,8 @@ BEGIN
     EXECUTE format ('SELECT count(*) FROM (
         SELECT course_id FROM %I 
         EXCEPT
-        SELECT course_id FROM %I) AS num_prereq_not_done', 
-        new_course_offering_id || '_prereq', 'student_current_courses_' || entry_number
+        SELECT course_id FROM %I WHERE status = ''Completed'') AS num_prereq_not_done', 
+        new_course_offering_id || '_prereq', 'student_past_courses_' || entry_number
     ) INTO prereq_not_done;
 
     IF (prereq_not_done > 0) THEN
@@ -440,7 +454,7 @@ END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION student_ticket_generator (
-    IN extra_credits_required INTEGER,
+    IN extra_credits_required FLOAT,
     IN semester INTEGER,
     IN year INTEGER
 ) RETURNS VOID AS $$
@@ -534,6 +548,10 @@ DECLARE
     extra_credits_required FLOAT;
 BEGIN
     -- update status in student ticket table
+    IF SESSION_USER != 'dean_academics' THEN
+        RAISE EXCEPTION 'Only the dean can approve the ticket';
+    END IF;
+
     EXECUTE format (
         'UPDATE %I 
          SET status = %L
@@ -567,8 +585,12 @@ CREATE OR REPLACE FUNCTION dean_rejection (
 ) RETURNS VOID AS $$
 BEGIN
     -- update status in student ticket table
+    IF SESSION_USER != 'dean_academics' THEN
+        RAISE EXCEPTION 'Only the dean can reject the ticket';
+    END IF;
+
     EXECUTE format (
-        'UPDATE %I 
+        'UPDATE %I
          SET status = %L
          WHERE ticket_id = %L;', 'student_ticket_table_' || entry_number, 'Rejected by dean', ticket_id
     );
@@ -698,6 +720,10 @@ DECLARE
     first_name VARCHAR(100);
     last_name VARCHAR(100);
 BEGIN
+    IF SESSION_USER != 'academics_office' THEN
+        RAISE EXCEPTION 'Only the academics office can generate the report';
+    END IF;
+
     student_entry_number = entry_number;
     EXECUTE format ('SELECT first_name FROM student_database WHERE entry_number = %L', student_entry_number) INTO first_name;
     EXECUTE format ('SELECT last_name FROM student_database WHERE entry_number = %L', student_entry_number) INTO last_name;
@@ -742,8 +768,12 @@ BEGIN
     LOOP
         sgpa_numerator = sgpa_numerator + report_entry.credits * report_entry.grade;
     END LOOP;
-
-    sgpa = sgpa_numerator / credits_completed;
+    
+    IF credits_completed = 0 THEN
+        sgpa = 0;
+    ELSE
+        sgpa = sgpa_numerator / credits_completed;
+    END IF;
     --cgpa store me se uthani h
 
     EXECUTE format ('SELECT cgpa FROM student_database WHERE entry_number = %L', student_entry_number) INTO cgpa;
